@@ -71,18 +71,10 @@ runs:
           exit 2
         fi
 
-        # Parse results
+        # Parse results from AccessiGuard JSON format
         SCORE=$(echo "$RESULT" | jq -r '.score // 0')
-        TOTAL_ISSUES=$(echo "$RESULT" | jq -r '[.issues[]? | length] | add // 0')
-        CRITICAL=$(echo "$RESULT" | jq -r '[.issues[]? | select(.severity == "critical")] | length // 0')
-
-        # Handle nested issues structure
-        if [ "$TOTAL_ISSUES" = "0" ]; then
-          TOTAL_ISSUES=$(echo "$RESULT" | jq -r '.totalIssues // 0')
-        fi
-        if [ "$CRITICAL" = "0" ]; then
-          CRITICAL=$(echo "$RESULT" | jq -r '.criticalIssues // 0')
-        fi
+        TOTAL_ISSUES=$(echo "$RESULT" | jq -r '.summary.total // 0')
+        CRITICAL=$(echo "$RESULT" | jq -r '.summary.critical // 0')
 
         PASSED="true"
         if [ "$SCORE" -lt "$INPUT_THRESHOLD" ]; then
