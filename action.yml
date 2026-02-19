@@ -1,0 +1,184 @@
+name: 'AccessiGuard Accessibility Scanner'
+description: 'Scan your website for WCAG accessibility issues in CI/CD. 33 automated checks, AI-powered fix suggestions.'
+author: 'PrimeStark'
+
+branding:
+  icon: 'eye'
+  color: 'blue'
+
+inputs:
+  url:
+    description: 'URL to scan for accessibility issues'
+    required: true
+  threshold:
+    description: 'Minimum accessibility score to pass (0-100)'
+    required: false
+    default: '0'
+  fail-on-threshold:
+    description: 'Fail the workflow if score is below threshold'
+    required: false
+    default: 'true'
+  comment:
+    description: 'Post results as a PR comment'
+    required: false
+    default: 'true'
+  token:
+    description: 'GitHub token for PR comments (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  score:
+    description: 'Accessibility score (0-100)'
+    value: ${{ steps.scan.outputs.score }}
+  issues:
+    description: 'Number of issues found'
+    value: ${{ steps.scan.outputs.issues }}
+  critical:
+    description: 'Number of critical issues'
+    value: ${{ steps.scan.outputs.critical }}
+  passed:
+    description: 'Whether the score met the threshold'
+    value: ${{ steps.scan.outputs.passed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run AccessiGuard Scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_URL: ${{ inputs.url }}
+        INPUT_THRESHOLD: ${{ inputs.threshold }}
+      run: |
+        # Run the scan and capture JSON output
+        set +e
+        RESULT=$(npx -y accessiguard@latest scan "$INPUT_URL" --json 2>/dev/null)
+        EXIT_CODE=$?
+        set -e
+
+        if [ -z "$RESULT" ] || ! echo "$RESULT" | jq . > /dev/null 2>&1; then
+          echo "::error::Failed to scan $INPUT_URL — API may be unavailable"
+          echo "score=0" >> $GITHUB_OUTPUT
+          echo "issues=0" >> $GITHUB_OUTPUT
+          echo "critical=0" >> $GITHUB_OUTPUT
+          echo "passed=false" >> $GITHUB_OUTPUT
+          exit 2
+        fi
+
+        # Parse results
+        SCORE=$(echo "$RESULT" | jq -r '.score // 0')
+        TOTAL_ISSUES=$(echo "$RESULT" | jq -r '[.issues[]? | length] | add // 0')
+        CRITICAL=$(echo "$RESULT" | jq -r '[.issues[]? | select(.severity == "critical")] | length // 0')
+
+        # Handle nested issues structure
+        if [ "$TOTAL_ISSUES" = "0" ]; then
+          TOTAL_ISSUES=$(echo "$RESULT" | jq -r '.totalIssues // 0')
+        fi
+        if [ "$CRITICAL" = "0" ]; then
+          CRITICAL=$(echo "$RESULT" | jq -r '.criticalIssues // 0')
+        fi
+
+        PASSED="true"
+        if [ "$SCORE" -lt "$INPUT_THRESHOLD" ]; then
+          PASSED="false"
+        fi
+
+        echo "score=$SCORE" >> $GITHUB_OUTPUT
+        echo "issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "passed=$PASSED" >> $GITHUB_OUTPUT
+
+        # Summary for workflow log
+        echo "### ♿ AccessiGuard Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **URL** | \`$INPUT_URL\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Score** | **$SCORE**/100 |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Issues** | $TOTAL_ISSUES |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Critical** | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Threshold** | $INPUT_THRESHOLD |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Status** | $([ '$PASSED' = 'true' ] && echo '✅ Passed' || echo '❌ Failed') |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "*Powered by [AccessiGuard](https://accessiguard.app) — 33 WCAG checks, AI-powered fixes*" >> $GITHUB_STEP_SUMMARY
+
+        # Save full results for PR comment
+        echo "$RESULT" > /tmp/ag-scan-result.json
+
+    - name: Comment on PR
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          const fs = require('fs');
+          const score = '${{ steps.scan.outputs.score }}';
+          const issues = '${{ steps.scan.outputs.issues }}';
+          const critical = '${{ steps.scan.outputs.critical }}';
+          const passed = '${{ steps.scan.outputs.passed }}';
+          const threshold = '${{ inputs.threshold }}';
+          const url = '${{ inputs.url }}';
+
+          const emoji = score >= 90 ? '🟢' : score >= 70 ? '🟡' : score >= 50 ? '🟠' : '🔴';
+          const status = passed === 'true' ? '✅ Passed' : '❌ Failed';
+
+          let body = `## ♿ AccessiGuard Accessibility Report\n\n`;
+          body += `| Metric | Value |\n`;
+          body += `|--------|-------|\n`;
+          body += `| **URL** | \`${url}\` |\n`;
+          body += `| **Score** | ${emoji} **${score}**/100 |\n`;
+          body += `| **Issues Found** | ${issues} |\n`;
+          body += `| **Critical Issues** | ${critical} |\n`;
+          body += `| **Threshold** | ${threshold} |\n`;
+          body += `| **Status** | ${status} |\n\n`;
+
+          if (passed !== 'true') {
+            body += `> ⚠️ Accessibility score (${score}) is below the threshold (${threshold}). Please review and fix the issues before merging.\n\n`;
+          }
+
+          body += `<details><summary>What does this mean?</summary>\n\n`;
+          body += `AccessiGuard runs 33 automated WCAG accessibility checks against your deployed site. `;
+          body += `Issues found may affect users with disabilities and could create legal compliance risks.\n\n`;
+          body += `**Fix suggestions:** Run \`npx accessiguard scan ${url}\` locally for detailed AI-powered fix suggestions.\n`;
+          body += `</details>\n\n`;
+          body += `---\n*Powered by [AccessiGuard](https://accessiguard.app) • [Get the GitHub Action](https://github.com/PrimeStark/accessiguard-action)*`;
+
+          // Find and update existing comment or create new one
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const botComment = comments.find(c =>
+            c.body.includes('♿ AccessiGuard Accessibility Report')
+          );
+
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body,
+            });
+          }
+
+    - name: Enforce Threshold
+      if: ${{ inputs.fail-on-threshold == 'true' && steps.scan.outputs.passed == 'false' }}
+      shell: bash
+      run: |
+        echo "::error::Accessibility score (${{ steps.scan.outputs.score }}) is below threshold (${{ inputs.threshold }})"
+        exit 1
