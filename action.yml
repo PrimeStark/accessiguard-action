@@ -1,5 +1,5 @@
 name: 'AccessiGuard Accessibility Scanner'
-description: 'Scan your website for WCAG accessibility issues in CI/CD. 33 automated checks, AI-powered fix suggestions.'
+description: 'Scan your website for WCAG accessibility issues in CI/CD. 39 automated checks, AI-powered fix suggestions.'
 author: 'PrimeStark'
 
 branding:
@@ -71,9 +71,9 @@ runs:
           exit 2
         fi
 
-        # Parse results from AccessiGuard JSON format
+        # Parse results from AccessiGuard v2 JSON format
         SCORE=$(echo "$RESULT" | jq -r '.score // 0')
-        TOTAL_ISSUES=$(echo "$RESULT" | jq -r '.summary.total // 0')
+        TOTAL_ISSUES=$(echo "$RESULT" | jq -r '.issueCount // .summary.total // 0')
         CRITICAL=$(echo "$RESULT" | jq -r '.summary.critical // 0')
 
         PASSED="true"
@@ -98,7 +98,7 @@ runs:
         echo "| **Threshold** | $INPUT_THRESHOLD |" >> $GITHUB_STEP_SUMMARY
         echo "| **Status** | $([ '$PASSED' = 'true' ] && echo '✅ Passed' || echo '❌ Failed') |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "*Powered by [AccessiGuard](https://accessiguard.app) — 33 WCAG checks, AI-powered fixes*" >> $GITHUB_STEP_SUMMARY
+        echo "*Powered by [AccessiGuard](https://accessiguard.app) — 39 WCAG checks, AI-powered fixes*" >> $GITHUB_STEP_SUMMARY
 
         # Save full results for PR comment
         echo "$RESULT" > /tmp/ag-scan-result.json
@@ -135,7 +135,7 @@ runs:
           }
 
           body += `<details><summary>What does this mean?</summary>\n\n`;
-          body += `AccessiGuard runs 33 automated WCAG accessibility checks against your deployed site. `;
+          body += `AccessiGuard runs 39 automated WCAG accessibility checks against your deployed site. `;
           body += `Issues found may affect users with disabilities and could create legal compliance risks.\n\n`;
           body += `**Fix suggestions:** Run \`npx accessiguard scan ${url}\` locally for detailed AI-powered fix suggestions.\n`;
           body += `</details>\n\n`;
